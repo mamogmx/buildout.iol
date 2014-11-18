@@ -1,0 +1,56 @@
+global
+  log 127.0.0.1 local6
+  maxconn  ${haproxy:maxconn}
+  daemon
+  nbproc 1
+
+defaults
+  mode http
+  option httpclose
+  # Remove requests from the queue if people press stop button
+  option abortonclose
+  # Try to connect this many times on failure
+  retries 3
+  # If a client is bound to a particular backend but it goes down,
+  # send them to a different one
+  option redispatch
+  monitor-uri /haproxy-ping
+
+  timeout connect 7s
+  timeout queue   300s
+  timeout client  300s
+  timeout server  300s
+
+  # Enable status page at this URL, on the port HAProxy is bound to
+  stats enable
+  stats uri /haproxy-status
+  stats refresh 5s
+  stats realm Haproxy statistics
+
+frontend balanced
+  bind ${haproxy:bind}
+  default_backend plone
+
+# Load balancing over the plone instances
+backend plone
+  # Use Zope's __ac cookie as a basis for session stickiness if present.
+  appsession __ac len 32 timeout 1d
+  # Otherwise add a cookie called "serverid" for maintaining session stickiness.
+  # This cookie lasts until the client's browser closes, and is invisible to Zope.
+  cookie serverid insert nocache indirect
+  # If no session found, use the roundrobin load-balancing algorithm to pick a backend.
+  balance roundrobin
+  # Use / (the default) for periodic backend health checks
+  option httpchk OPTIONS /
+
+  # Server options:
+  # "cookie" sets the value of the serverid cookie to be used for the server
+  # "maxconn" is how many connections can be sent to the server at once
+  # "check" enables health checks
+  # "rise 1" means consider Zope up after 1 successful health check
+  server  plone1 127.0.0.1:${buildout:http-address} cookie plone1 check inter 5m fastinter 2s downinter 1m maxconn 3 rise 1
+  server  plone2 127.0.0.1:${buildout:client2-address} cookie plone2 check inter 5m fastinter 2s downinter 1m maxconn 3 rise 1
+  server  plone3 127.0.0.1:${buildout:client3-address} cookie plone3 check inter 5m fastinter 2s downinter 1m maxconn 3 rise 1
+
+# We leave out plone4 because his duty is serve pages to phantomjs for PDF generation
+#  server  plone4 127.0.0.1:${buildout:client4-address} cookie plone4 check maxconn 3 rise 1
